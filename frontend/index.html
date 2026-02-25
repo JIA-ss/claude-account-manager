@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>账号管理 - claudetest</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-head">
+        <h1>账号管理</h1>
+        <p>迁移自原工程的简化版页面，保留：账号列表、自动刷新、添加账号、数据导入导出。</p>
+      </header>
+
+      <section class="panel">
+        <div class="filters-row">
+          <input id="search-input" class="input" type="text" placeholder="搜索账号名称/备注/邮箱" />
+
+          <select id="platform-filter" class="input select">
+            <option value="">全部平台</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini</option>
+            <option value="antigravity">Antigravity</option>
+            <option value="sora">Sora</option>
+          </select>
+
+          <select id="type-filter" class="input select">
+            <option value="">全部类型</option>
+            <option value="oauth">OAuth</option>
+            <option value="setup-token">Setup Token</option>
+            <option value="apikey">API Key</option>
+            <option value="upstream">Upstream</option>
+          </select>
+
+          <select id="status-filter" class="input select">
+            <option value="">全部状态</option>
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="error">error</option>
+          </select>
+        </div>
+
+        <div class="actions-row">
+          <button id="btn-refresh" class="btn btn-secondary">
+            <span class="icon">↻</span>
+            刷新
+          </button>
+
+          <div class="dropdown-wrap" id="auto-refresh-wrap">
+            <button id="btn-auto-refresh" class="btn btn-secondary">
+              <span class="icon">⟳</span>
+              <span id="auto-refresh-label">自动刷新</span>
+            </button>
+            <div id="auto-refresh-dropdown" class="dropdown hidden">
+              <label class="check-row">
+                <input id="auto-refresh-enabled" type="checkbox" />
+                启用自动刷新
+              </label>
+              <div class="divider"></div>
+              <div class="dropdown-title">刷新间隔</div>
+              <div id="interval-options" class="interval-grid">
+                <button data-sec="5" class="btn btn-ghost interval-btn">5s</button>
+                <button data-sec="10" class="btn btn-ghost interval-btn">10s</button>
+                <button data-sec="15" class="btn btn-ghost interval-btn">15s</button>
+                <button data-sec="30" class="btn btn-ghost interval-btn">30s</button>
+              </div>
+            </div>
+          </div>
+
+          <button id="btn-export-data" class="btn btn-secondary">数据导出</button>
+          <button id="btn-import-data" class="btn btn-secondary">数据导入</button>
+          <input id="import-file-input" type="file" class="hidden" accept="application/json,.json" />
+
+          <button id="btn-create" class="btn btn-primary">添加账号</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="bg-refresh-head">
+          <h3>后台刷新状态（服务端常驻）</h3>
+          <p>开启后即使前端页面关闭，后端也会按间隔自动请求 Claude 官方用量接口。</p>
+        </div>
+        <div class="bg-refresh-controls">
+          <label class="check-row">
+            <input id="bg-refresh-enabled" type="checkbox" />
+            启用后台刷新
+          </label>
+          <select id="bg-refresh-interval" class="input select bg-refresh-interval"></select>
+          <button id="btn-bg-refresh-save" class="btn btn-secondary">保存配置</button>
+          <button id="btn-bg-refresh-run" class="btn btn-primary">立即执行一次</button>
+        </div>
+        <div class="bg-refresh-grid">
+          <div class="kv-item">
+            <span class="kv-label">开关状态</span>
+            <span id="bg-refresh-status-badge" class="badge status-inactive">关闭</span>
+          </div>
+          <div class="kv-item">
+            <span class="kv-label">当前运行</span>
+            <span id="bg-refresh-running">-</span>
+          </div>
+          <div class="kv-item">
+            <span class="kv-label">下次执行</span>
+            <span id="bg-refresh-next-run">-</span>
+          </div>
+          <div class="kv-item">
+            <span class="kv-label">上次开始</span>
+            <span id="bg-refresh-last-start">-</span>
+          </div>
+          <div class="kv-item">
+            <span class="kv-label">上次结束</span>
+            <span id="bg-refresh-last-finish">-</span>
+          </div>
+          <div class="kv-item">
+            <span class="kv-label">最近结果</span>
+            <span id="bg-refresh-last-result">-</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>平台/类型</th>
+                <th>状态</th>
+                <th>可调度</th>
+                <th>并发</th>
+                <th>优先级</th>
+                <th>倍率</th>
+                <th>5h/7d 用量</th>
+                <th>最后使用</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="accounts-tbody">
+              <tr>
+                <td colspan="11" class="empty-cell">加载中...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-footer">
+          <div id="summary-text" class="summary-text">-</div>
+          <div class="pagination">
+            <button id="btn-prev-page" class="btn btn-secondary">上一页</button>
+            <span id="page-text">1 / 1</span>
+            <button id="btn-next-page" class="btn btn-secondary">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="error-box" class="alert error hidden"></div>
+      <div id="success-box" class="alert success hidden"></div>
+    </main>
+
+    <div id="modal-mask" class="modal-mask hidden">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>添加账号</h2>
+          <button id="btn-close-modal" class="icon-btn">✕</button>
+        </div>
+
+        <form id="create-form" class="modal-body">
+          <div class="grid two">
+            <div>
+              <label class="field-label" for="form-name">账号名称 *</label>
+              <input id="form-name" class="input" type="text" required />
+            </div>
+            <div>
+              <label class="field-label" for="form-status">状态</label>
+              <select id="form-status" class="input select">
+                <option value="active">active</option>
+                <option value="inactive">inactive</option>
+                <option value="error">error</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="field-label" for="form-notes">备注</label>
+            <textarea id="form-notes" class="input textarea" rows="2"></textarea>
+          </div>
+
+          <div class="grid two">
+            <div>
+              <label class="field-label" for="form-platform">平台</label>
+              <select id="form-platform" class="input select">
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Gemini</option>
+                <option value="antigravity">Antigravity</option>
+                <option value="sora">Sora</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="form-type">类型</label>
+              <select id="form-type" class="input select">
+                <option value="oauth">oauth</option>
+                <option value="setup-token">setup-token</option>
+                <option value="apikey">apikey</option>
+                <option value="upstream">upstream</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid three">
+            <div>
+              <label class="field-label" for="form-concurrency">并发</label>
+              <input id="form-concurrency" class="input" type="number" min="1" value="1" />
+            </div>
+            <div>
+              <label class="field-label" for="form-priority">优先级</label>
+              <input id="form-priority" class="input" type="number" min="1" value="1" />
+            </div>
+            <div>
+              <label class="field-label" for="form-rate-multiplier">倍率</label>
+              <input id="form-rate-multiplier" class="input" type="number" min="0" step="0.01" value="1" />
+            </div>
+          </div>
+
+          <label class="check-row">
+            <input id="form-schedulable" type="checkbox" checked />
+            可调度（schedulable）
+          </label>
+
+          <section id="oauth-create-section" class="oauth-card hidden">
+            <div class="oauth-head">
+              <h3>OAuth 授权码创建（Anthropic）</h3>
+              <label class="check-row">
+                <input id="oauth-create-enabled" type="checkbox" />
+                使用授权码创建
+              </label>
+            </div>
+
+            <div id="oauth-create-body" class="hidden">
+              <div class="oauth-step">
+                <button id="btn-generate-url" type="button" class="btn btn-primary">生成授权 URL</button>
+              </div>
+              <div id="oauth-url-box" class="oauth-step hidden">
+                <div class="oauth-url-row">
+                  <input id="oauth-auth-url" class="input mono" readonly />
+                  <button id="btn-copy-url" type="button" class="btn btn-secondary">复制</button>
+                  <button id="btn-open-url" type="button" class="btn btn-secondary">打开</button>
+                </div>
+                <div class="oauth-meta">
+                  session_id: <span id="oauth-session-id" class="mono">-</span>
+                </div>
+              </div>
+              <div class="oauth-step">
+                <label class="field-label" for="oauth-auth-code">授权码 / 回调链接</label>
+                <textarea
+                  id="oauth-auth-code"
+                  class="input textarea mono"
+                  rows="3"
+                  placeholder="粘贴 code 或完整回调 URL"
+                ></textarea>
+              </div>
+            </div>
+          </section>
+
+          <section id="manual-credentials-section">
+            <label class="field-label" for="form-credentials">credentials (JSON)</label>
+            <textarea
+              id="form-credentials"
+              class="input textarea mono"
+              rows="4"
+              placeholder='例如: {"api_key":"xxx"}'
+            ></textarea>
+          </section>
+
+          <div class="modal-actions">
+            <button id="btn-cancel-modal" type="button" class="btn btn-secondary">取消</button>
+            <button id="btn-submit-create" type="submit" class="btn btn-primary">创建账号</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>
