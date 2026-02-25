@@ -33,5 +33,6 @@ http://127.0.0.1:8787
 ## 文档
 
 - [系统概览](docs/overview.md)
+- [后台启动服务](docs/run-backend.md)
 - [接口说明](docs/api.md)
 - [核心流程与数据格式](docs/workflows.md)
