@@ -100,7 +100,9 @@ const els = {
   btnOpenUrl: document.getElementById("btn-open-url"),
   oauthSessionId: document.getElementById("oauth-session-id"),
   oauthAuthCode: document.getElementById("oauth-auth-code"),
-  btnSubmitCreate: document.getElementById("btn-submit-create")
+  btnSubmitCreate: document.getElementById("btn-submit-create"),
+  modalErrorBox: document.getElementById("modal-error-box"),
+  modalSuccessBox: document.getElementById("modal-success-box")
 };
 
 function escapeHTML(input) {
@@ -120,24 +122,42 @@ function debounce(fn, waitMs) {
   };
 }
 
+function isModalOpen() {
+  return !els.modalMask.classList.contains("hidden");
+}
+
 function showError(message) {
   if (!message) {
     els.errorBox.classList.add("hidden");
     els.errorBox.textContent = "";
+    els.modalErrorBox.classList.add("hidden");
+    els.modalErrorBox.textContent = "";
     return;
   }
-  els.errorBox.textContent = message;
-  els.errorBox.classList.remove("hidden");
+  if (isModalOpen()) {
+    els.modalErrorBox.textContent = message;
+    els.modalErrorBox.classList.remove("hidden");
+  } else {
+    els.errorBox.textContent = message;
+    els.errorBox.classList.remove("hidden");
+  }
 }
 
 function showSuccess(message) {
   if (!message) {
     els.successBox.classList.add("hidden");
     els.successBox.textContent = "";
+    els.modalSuccessBox.classList.add("hidden");
+    els.modalSuccessBox.textContent = "";
     return;
   }
-  els.successBox.textContent = message;
-  els.successBox.classList.remove("hidden");
+  if (isModalOpen()) {
+    els.modalSuccessBox.textContent = message;
+    els.modalSuccessBox.classList.remove("hidden");
+  } else {
+    els.successBox.textContent = message;
+    els.successBox.classList.remove("hidden");
+  }
 }
 
 function clearMessages() {
