@@ -91,6 +91,18 @@
           <select id="bg-refresh-interval" class="input select bg-refresh-interval"></select>
           <button id="btn-bg-refresh-save" class="btn btn-secondary">保存配置</button>
           <button id="btn-bg-refresh-run" class="btn btn-primary">立即执行一次</button>
+          <div class="bg-task-row">
+            <label class="check-row">
+              <input id="bg-task-enabled" type="checkbox" />
+              启用后台执行任务
+            </label>
+            <textarea
+              id="bg-task-content"
+              class="input bg-task-content"
+              rows="3"
+              placeholder="输入要后台执行的任务内容（保存配置后生效）..."
+            ></textarea>
+          </div>
         </div>
         <div class="bg-refresh-grid">
           <div class="kv-item">

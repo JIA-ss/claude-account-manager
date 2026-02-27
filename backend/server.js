@@ -51,6 +51,8 @@ let backgroundRefreshTicker = null;
 const backgroundRefresh = {
   enabled: false,
   interval_seconds: DEFAULT_BACKGROUND_REFRESH_INTERVAL_SECONDS,
+  task_enabled: false,
+  task_content: "",
   running: false,
   next_run_at: null,
   last_started_at: null,
@@ -300,11 +302,15 @@ function saveAccounts() {
 function normalizeBackgroundRefreshConfig(raw) {
   const enabled = raw && raw.enabled === true;
   const interval = Number(raw && raw.interval_seconds);
+  const task_enabled = !!(raw && raw.task_enabled === true);
+  const task_content = typeof (raw && raw.task_content) === "string" ? raw.task_content : "";
   return {
     enabled,
     interval_seconds: BACKGROUND_REFRESH_ALLOWED_INTERVALS.includes(interval)
       ? interval
-      : DEFAULT_BACKGROUND_REFRESH_INTERVAL_SECONDS
+      : DEFAULT_BACKGROUND_REFRESH_INTERVAL_SECONDS,
+    task_enabled,
+    task_content
   };
 }
 
@@ -320,6 +326,8 @@ function loadBackgroundRefreshConfig() {
     const cfg = normalizeBackgroundRefreshConfig(parsed);
     backgroundRefresh.enabled = cfg.enabled;
     backgroundRefresh.interval_seconds = cfg.interval_seconds;
+    backgroundRefresh.task_enabled = cfg.task_enabled;
+    backgroundRefresh.task_content = cfg.task_content;
   } catch (err) {
     console.error("[claudetest] failed to load background refresh config:", err);
     backgroundRefresh.enabled = false;
@@ -332,7 +340,9 @@ function saveBackgroundRefreshConfig() {
   ensureDataDir();
   const payload = {
     enabled: backgroundRefresh.enabled,
-    interval_seconds: backgroundRefresh.interval_seconds
+    interval_seconds: backgroundRefresh.interval_seconds,
+    task_enabled: backgroundRefresh.task_enabled,
+    task_content: backgroundRefresh.task_content
   };
   fs.writeFileSync(BACKGROUND_REFRESH_FILE, JSON.stringify(payload, null, 2), "utf8");
 }
@@ -641,6 +651,38 @@ async function refreshSingleAccountUsage(account) {
   }
 }
 
+function fireClaudeTask(account, taskContent) {
+  if (account.platform !== "anthropic") return;
+  const accessToken =
+    isObject(account.credentials) && typeof account.credentials.access_token === "string"
+      ? account.credentials.access_token.trim()
+      : "";
+  if (!accessToken) return;
+
+  const body = JSON.stringify({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    stream: false,
+    messages: [{ role: "user", content: taskContent }]
+  });
+
+  fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+      "User-Agent": "claude-cli/2.1.22 (external, cli)",
+      "X-App": "cli",
+      "Anthropic-Dangerous-Direct-Browser-Access": "true"
+    },
+    body
+  }).then((res) => {
+    if (res.body) res.body.cancel();
+  }).catch(() => {});
+}
+
 async function forceRefreshAllUsage() {
   if (refreshUsageTask) {
     return refreshUsageTask;
@@ -679,6 +721,11 @@ async function runBackgroundRefreshCycle(source) {
 
   try {
     const result = await forceRefreshAllUsage();
+    if (backgroundRefresh.task_enabled && backgroundRefresh.task_content) {
+      for (const account of accounts) {
+        fireClaudeTask(account, backgroundRefresh.task_content);
+      }
+    }
     backgroundRefresh.last_result = {
       source,
       at: nowISO(),
@@ -744,6 +791,12 @@ function applyBackgroundRefreshConfig(input) {
         `interval_seconds must be one of: ${BACKGROUND_REFRESH_ALLOWED_INTERVALS.join(", ")}`
       );
     }
+  }
+  if (input && typeof input.task_enabled === "boolean") {
+    backgroundRefresh.task_enabled = input.task_enabled;
+  }
+  if (input && typeof input.task_content === "string") {
+    backgroundRefresh.task_content = String(input.task_content);
   }
   scheduleNextBackgroundRun();
   saveBackgroundRefreshConfig();
@@ -1481,7 +1534,9 @@ function buildBackgroundRefreshStatus() {
     last_started_at: backgroundRefresh.last_started_at,
     last_finished_at: backgroundRefresh.last_finished_at,
     last_error: backgroundRefresh.last_error,
-    last_result: backgroundRefresh.last_result
+    last_result: backgroundRefresh.last_result,
+    task_enabled: backgroundRefresh.task_enabled,
+    task_content: backgroundRefresh.task_content
   };
 }
 
@@ -1502,7 +1557,9 @@ async function handleUpdateBackgroundRefreshConfig(req, res) {
     applyBackgroundRefreshConfig({
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       interval_seconds:
-        body.interval_seconds == null ? undefined : Number(body.interval_seconds)
+        body.interval_seconds == null ? undefined : Number(body.interval_seconds),
+      task_enabled: typeof body.task_enabled === "boolean" ? body.task_enabled : undefined,
+      task_content: typeof body.task_content === "string" ? body.task_content : undefined
     });
   } catch (err) {
     writeJSON(res, 400, { detail: String(err.message || err) });

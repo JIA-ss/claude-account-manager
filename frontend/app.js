@@ -34,7 +34,9 @@ const state = {
     last_started_at: null,
     last_finished_at: null,
     last_error: null,
-    last_result: null
+    last_result: null,
+    task_enabled: false,
+    task_content: ""
   },
   oauthCreate: {
     authUrl: "",
@@ -67,6 +69,8 @@ const els = {
   bgRefreshLastStart: document.getElementById("bg-refresh-last-start"),
   bgRefreshLastFinish: document.getElementById("bg-refresh-last-finish"),
   bgRefreshLastResult: document.getElementById("bg-refresh-last-result"),
+  bgTaskEnabled: document.getElementById("bg-task-enabled"),
+  bgTaskContent: document.getElementById("bg-task-content"),
   btnCreate: document.getElementById("btn-create"),
   tbody: document.getElementById("accounts-tbody"),
   summaryText: document.getElementById("summary-text"),
@@ -412,6 +416,8 @@ function renderBackgroundRefreshStatus() {
   const s = state.backgroundRefresh;
 
   els.bgRefreshEnabled.checked = s.enabled === true;
+  els.bgTaskEnabled.checked = s.task_enabled === true;
+  els.bgTaskContent.value = s.task_content || "";
   renderBackgroundRefreshIntervalOptions();
 
   els.bgRefreshStatusBadge.textContent = s.enabled ? "已开启" : "已关闭";
@@ -496,6 +502,8 @@ async function fetchBackgroundRefreshStatus(silent) {
     state.backgroundRefresh.last_finished_at = data.last_finished_at || null;
     state.backgroundRefresh.last_error = data.last_error || null;
     state.backgroundRefresh.last_result = data.last_result || null;
+    state.backgroundRefresh.task_enabled = data.task_enabled === true;
+    state.backgroundRefresh.task_content = typeof data.task_content === "string" ? data.task_content : "";
     renderBackgroundRefreshStatus();
   } catch (err) {
     if (!silent) {
@@ -511,7 +519,9 @@ async function saveBackgroundRefreshConfig() {
     const interval = Number(els.bgRefreshInterval.value || "60");
     const data = await request("POST", "/api/background-refresh/config", {
       enabled,
-      interval_seconds: interval
+      interval_seconds: interval,
+      task_enabled: els.bgTaskEnabled.checked,
+      task_content: els.bgTaskContent.value
     });
     state.backgroundRefresh.enabled = data.enabled === true;
     state.backgroundRefresh.interval_seconds = Number(data.interval_seconds || interval);
@@ -526,6 +536,8 @@ async function saveBackgroundRefreshConfig() {
     state.backgroundRefresh.last_finished_at = data.last_finished_at || null;
     state.backgroundRefresh.last_error = data.last_error || null;
     state.backgroundRefresh.last_result = data.last_result || null;
+    state.backgroundRefresh.task_enabled = data.task_enabled === true;
+    state.backgroundRefresh.task_content = typeof data.task_content === "string" ? data.task_content : "";
     renderBackgroundRefreshStatus();
     showSuccess("后台刷新配置已保存");
   } catch (err) {

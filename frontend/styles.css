@@ -92,6 +92,21 @@ body {
   width: 160px;
 }
 
+.bg-task-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bg-task-content {
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  min-height: 64px;
+}
+
 .bg-refresh-grid {
   margin-top: 10px;
   border: 1px solid #e2e8f0;

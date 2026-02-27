@@ -1,3 +1,4 @@
 backend/data/*.json
 *.log
 node_modules/
+.claude/
