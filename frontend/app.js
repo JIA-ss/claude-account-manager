@@ -69,6 +69,7 @@ const els = {
   bgRefreshLastStart: document.getElementById("bg-refresh-last-start"),
   bgRefreshLastFinish: document.getElementById("bg-refresh-last-finish"),
   bgRefreshLastResult: document.getElementById("bg-refresh-last-result"),
+  bgTaskLastResult: document.getElementById("bg-task-last-result"),
   bgTaskEnabled: document.getElementById("bg-task-enabled"),
   bgTaskContent: document.getElementById("bg-task-content"),
   btnCreate: document.getElementById("btn-create"),
@@ -461,6 +462,25 @@ function renderBackgroundRefreshStatus() {
   } else {
     els.bgRefreshLastResult.textContent = "-";
     els.bgRefreshLastResult.className = "";
+  }
+
+  // 任务执行结果
+  if (!s.task_enabled) {
+    els.bgTaskLastResult.textContent = "未启用";
+    els.bgTaskLastResult.className = "";
+  } else if (s.last_result && typeof s.last_result === "object" && typeof s.last_result.task_fired === "number") {
+    const fired = s.last_result.task_fired;
+    const when = s.last_result.task_at ? formatRelativeTime(s.last_result.task_at) : "-";
+    if (fired > 0) {
+      els.bgTaskLastResult.textContent = `已触发 ${fired} 个账号 (${when})`;
+      els.bgTaskLastResult.className = "";
+    } else {
+      els.bgTaskLastResult.textContent = "无可用账号";
+      els.bgTaskLastResult.className = "";
+    }
+  } else {
+    els.bgTaskLastResult.textContent = "尚未执行";
+    els.bgTaskLastResult.className = "";
   }
 }
 

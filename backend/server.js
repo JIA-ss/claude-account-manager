@@ -825,13 +825,20 @@ async function runBackgroundRefreshCycle(source) {
   try {
     const tokenResults = await refreshAllExpiredTokens();
     const result = await forceRefreshAllUsage();
-    if (backgroundRefresh.task_enabled && backgroundRefresh.task_content) {
-      for (const account of accounts) {
-        fireClaudeTask(account, backgroundRefresh.task_content);
-      }
-    }
     const tokenRefreshed = tokenResults.filter((r) => r.refreshed).length;
     const tokenFailed = tokenResults.filter((r) => !r.refreshed && r.reason !== "no_refresh_token" && r.reason !== undefined && r.reason !== "platform_not_supported").length;
+    let taskFired = 0;
+    if (backgroundRefresh.task_enabled && backgroundRefresh.task_content) {
+      for (const account of accounts) {
+        if (account.platform === "anthropic" &&
+            isObject(account.credentials) &&
+            typeof account.credentials.access_token === "string" &&
+            account.credentials.access_token.trim()) {
+          fireClaudeTask(account, backgroundRefresh.task_content);
+          taskFired += 1;
+        }
+      }
+    }
     backgroundRefresh.last_result = {
       source,
       at: nowISO(),
@@ -839,7 +846,9 @@ async function runBackgroundRefreshCycle(source) {
       refreshed: result.refreshed,
       failed: result.failed,
       token_refreshed: tokenRefreshed,
-      token_failed: tokenFailed
+      token_failed: tokenFailed,
+      task_fired: taskFired,
+      task_at: taskFired > 0 ? nowISO() : null
     };
     return result;
   } catch (err) {
