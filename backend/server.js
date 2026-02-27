@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
+const { exec: cpExec } = require("child_process");
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8787);
@@ -682,21 +683,95 @@ async function refreshSingleAccountUsage(account) {
   }
 }
 
-async function fireClaudeTask(account, taskContent) {
-  if (account.platform !== "anthropic") return null;
+const TASK_TOOLS = [
+  {
+    name: "web_fetch",
+    description: "Fetch the content of a URL and return the page text. Use to access web pages, documentation, or APIs.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The full URL to fetch (must start with http:// or https://)" }
+      },
+      required: ["url"]
+    }
+  },
+  {
+    name: "bash",
+    description: "Execute a bash command on the server and return stdout and stderr. Timeout is 30 seconds.",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The bash command to execute" }
+      },
+      required: ["command"]
+    }
+  },
+  {
+    name: "dispatch_subtask",
+    description: "Dispatch a sub-task to a new Claude instance using this account and return its response. Use to delegate sub-problems.",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "The task content for the sub-agent" }
+      },
+      required: ["content"]
+    }
+  }
+];
+
+async function executeTool_webFetch(url) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    return { success: false, error: "Invalid URL: must start with http:// or https://" };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; ClaudeAccountManager/1.0)" }
+    });
+    let text = await res.text();
+    text = text
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s{3,}/g, "\n")
+      .trim();
+    if (text.length > 8000) text = text.slice(0, 8000) + "\n...(content truncated)";
+    return { success: true, url, status: res.status, content: text };
+  } catch (err) {
+    return { success: false, url, error: err.name === "AbortError" ? "请求超时" : String(err.message || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function executeTool_bash(command) {
+  return new Promise((resolve) => {
+    cpExec(command, { timeout: 30000 }, (err, stdout, stderr) => {
+      if (err && err.killed) {
+        resolve({ success: false, stdout: stdout || "", stderr: stderr || "", error: "命令执行超时" });
+      } else if (err) {
+        resolve({ success: false, stdout: stdout || "", stderr: stderr || "", exit_code: err.code, error: err.message });
+      } else {
+        resolve({ success: true, stdout: stdout || "", stderr: stderr || "", exit_code: 0 });
+      }
+    });
+  });
+}
+
+async function executeTool_dispatchSubtask(account, content) {
   const accessToken =
     isObject(account.credentials) && typeof account.credentials.access_token === "string"
       ? account.credentials.access_token.trim()
       : "";
-  if (!accessToken) return null;
+  if (!accessToken) return { success: false, error: "No access token" };
 
   const body = JSON.stringify({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    stream: false,
-    messages: [{ role: "user", content: taskContent }]
+    max_tokens: 2048,
+    messages: [{ role: "user", content }]
   });
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -717,18 +792,111 @@ async function fireClaudeTask(account, taskContent) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const errMsg = (isObject(data.error) && data.error.message) ? data.error.message : `status ${res.status}`;
-      return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+      return { success: false, error: errMsg };
     }
     const text = Array.isArray(data.content)
       ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("")
       : "";
-    return { account_id: account.id, name: account.name, text, at: nowISO() };
+    return { success: true, result: text };
   } catch (err) {
-    const errMsg = err.name === "AbortError" ? "请求超时" : String(err.message || err);
-    return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+    return { success: false, error: err.name === "AbortError" ? "请求超时" : String(err.message || err) };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function executeTaskTool(toolName, toolInput, account) {
+  switch (toolName) {
+    case "web_fetch":
+      return executeTool_webFetch(toolInput.url);
+    case "bash":
+      return executeTool_bash(toolInput.command);
+    case "dispatch_subtask":
+      return executeTool_dispatchSubtask(account, toolInput.content);
+    default:
+      return { success: false, error: `Unknown tool: ${toolName}` };
+  }
+}
+
+async function fireClaudeTask(account, taskContent) {
+  if (account.platform !== "anthropic") return null;
+  const accessToken =
+    isObject(account.credentials) && typeof account.credentials.access_token === "string"
+      ? account.credentials.access_token.trim()
+      : "";
+  if (!accessToken) return null;
+
+  const CLAUDE_HEADERS = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${accessToken}`,
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+    "User-Agent": "claude-cli/2.1.22 (external, cli)",
+    "X-App": "cli",
+    "Anthropic-Dangerous-Direct-Browser-Access": "true"
+  };
+
+  const messages = [{ role: "user", content: taskContent }];
+  const MAX_TURNS = 20;
+  let finalText = "";
+  let toolCallCount = 0;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const body = JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      tools: TASK_TOOLS,
+      messages
+    });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let data;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: CLAUDE_HEADERS,
+        body,
+        signal: controller.signal
+      });
+      data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg = (isObject(data.error) && data.error.message) ? data.error.message : `status ${res.status}`;
+        return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+      }
+    } catch (err) {
+      const errMsg = err.name === "AbortError" ? "请求超时" : String(err.message || err);
+      return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (Array.isArray(data.content)) {
+      const turnText = data.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+      if (turnText) finalText = turnText;
+    }
+
+    messages.push({ role: "assistant", content: data.content });
+
+    if (data.stop_reason !== "tool_use") break;
+
+    const toolUseBlocks = (data.content || []).filter((b) => b.type === "tool_use");
+    if (toolUseBlocks.length === 0) break;
+
+    const toolResults = [];
+    for (const block of toolUseBlocks) {
+      const result = await executeTaskTool(block.name, block.input || {}, account);
+      toolCallCount += 1;
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: block.id,
+        content: JSON.stringify(result)
+      });
+    }
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  return { account_id: account.id, name: account.name, text: finalText, tool_calls: toolCallCount, at: nowISO() };
 }
 
 function needsTokenRefresh(account) {

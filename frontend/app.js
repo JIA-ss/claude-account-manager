@@ -501,11 +501,15 @@ function renderBackgroundRefreshStatus() {
       .map((r) => {
         const name = r.name || r.account_id || "未知";
         const at = r.at ? `<span class="task-result-time">${formatRelativeTime(r.at)}</span>` : "";
+        const toolInfo =
+          typeof r.tool_calls === "number" && r.tool_calls > 0
+            ? `<span class="task-result-tools">调用工具 ${r.tool_calls} 次</span>`
+            : "";
         if (r.error) {
-          return `<div class="task-result-item task-result-error"><span class="task-result-name">${escHtml(name)}</span>${at}<span class="task-result-text">${escHtml(r.error)}</span></div>`;
+          return `<div class="task-result-item task-result-error"><span class="task-result-name">${escHtml(name)}</span>${at}${toolInfo}<span class="task-result-text">${escHtml(r.error)}</span></div>`;
         }
         const text = typeof r.text === "string" ? r.text : "";
-        return `<div class="task-result-item"><span class="task-result-name">${escHtml(name)}</span>${at}<span class="task-result-text">${escHtml(text)}</span></div>`;
+        return `<div class="task-result-item"><span class="task-result-name">${escHtml(name)}</span>${at}${toolInfo}<span class="task-result-text">${escHtml(text)}</span></div>`;
       })
       .join("");
     els.bgTaskResults.classList.remove("hidden");
