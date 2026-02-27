@@ -643,12 +643,41 @@ async function refreshSingleAccountUsage(account) {
     account.updated_at = nowISO();
     return { account_id: account.id, refreshed: true };
   } catch (err) {
+    const errMsg = String(err.message || err);
+    // 检测 401：自动刷新 token 后重试一次
+    if (/status 401/.test(errMsg)) {
+      const tokenResult = await refreshSingleAccountToken(account);
+      if (tokenResult.refreshed) {
+        const newToken =
+          isObject(account.credentials) && typeof account.credentials.access_token === "string"
+            ? account.credentials.access_token.trim()
+            : "";
+        if (newToken) {
+          try {
+            const usage = await fetchClaudeUsage(newToken);
+            const nextExtra = isObject(account.extra) ? { ...account.extra } : {};
+            nextExtra.usage = usage;
+            nextExtra.usage_error = null;
+            account.extra = nextExtra;
+            account.updated_at = nowISO();
+            return { account_id: account.id, refreshed: true, token_auto_refreshed: true };
+          } catch (retryErr) {
+            const nextExtra = isObject(account.extra) ? { ...account.extra } : {};
+            nextExtra.usage_error = String(retryErr.message || retryErr);
+            nextExtra.usage_error_at = nowISO();
+            account.extra = nextExtra;
+            account.updated_at = nowISO();
+            return { account_id: account.id, refreshed: false, reason: "fetch_failed", error: String(retryErr.message || retryErr) };
+          }
+        }
+      }
+    }
     const nextExtra = isObject(account.extra) ? { ...account.extra } : {};
-    nextExtra.usage_error = String(err.message || err);
+    nextExtra.usage_error = errMsg;
     nextExtra.usage_error_at = nowISO();
     account.extra = nextExtra;
     account.updated_at = nowISO();
-    return { account_id: account.id, refreshed: false, reason: "fetch_failed", error: String(err.message || err) };
+    return { account_id: account.id, refreshed: false, reason: "fetch_failed", error: errMsg };
   }
 }
 
