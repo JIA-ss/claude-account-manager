@@ -442,8 +442,14 @@ function renderBackgroundRefreshStatus() {
   } else if (s.last_result && typeof s.last_result === "object") {
     const result = s.last_result;
     if (typeof result.refreshed === "number" && typeof result.total === "number") {
-      els.bgRefreshLastResult.textContent =
-        `${result.source || "unknown"}: ${result.refreshed}/${result.total} 成功`;
+      let text = `${result.source || "unknown"}: 用量 ${result.refreshed}/${result.total} 成功`;
+      if (typeof result.token_refreshed === "number" && result.token_refreshed > 0) {
+        text += `，Token 刷新 ${result.token_refreshed} 个`;
+      }
+      if (typeof result.token_failed === "number" && result.token_failed > 0) {
+        text += `，Token 刷新失败 ${result.token_failed} 个`;
+      }
+      els.bgRefreshLastResult.textContent = text;
       els.bgRefreshLastResult.className = "";
     } else if (result.error) {
       els.bgRefreshLastResult.textContent = `失败: ${result.error}`;

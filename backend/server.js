@@ -27,6 +27,7 @@ const OAUTH = {
 
 const DEFAULT_USAGE_USER_AGENT = "claude-code/2.1.7";
 const REQUEST_TIMEOUT_MS = 30 * 1000;
+const TOKEN_REFRESH_SKEW_MS = 3 * 60 * 1000;
 const BACKGROUND_REFRESH_ALLOWED_INTERVALS = [1, 10, 30, 60, 120, 300];
 const DEFAULT_BACKGROUND_REFRESH_INTERVAL_SECONDS = 60;
 const DATA_TYPE = "sub2api-data";
@@ -683,6 +684,79 @@ function fireClaudeTask(account, taskContent) {
   }).catch(() => {});
 }
 
+function needsTokenRefresh(account) {
+  if (account.platform !== "anthropic") return false;
+  if (account.type !== "oauth" && account.type !== "setup-token") return false;
+  if (!isObject(account.credentials)) return false;
+  const refreshToken = account.credentials.refresh_token;
+  if (!refreshToken || typeof refreshToken !== "string" || !refreshToken.trim()) return false;
+  const expiresAt = account.credentials.expires_at;
+  if (expiresAt == null) return true;
+  const expiresAtMs = Number(expiresAt) * 1000;
+  if (!Number.isFinite(expiresAtMs)) return true;
+  return expiresAtMs - Date.now() <= TOKEN_REFRESH_SKEW_MS;
+}
+
+async function refreshSingleAccountToken(account) {
+  const refreshToken = String(account.credentials.refresh_token || "").trim();
+  if (!refreshToken) {
+    return { account_id: account.id, refreshed: false, reason: "no_refresh_token" };
+  }
+  try {
+    const { response, data, rawText } = await fetchJSONWithTimeout(
+      OAUTH.tokenURL,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Content-Type": "application/json",
+          "User-Agent": "axios/1.8.4"
+        },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: OAUTH.clientId
+        })
+      },
+      REQUEST_TIMEOUT_MS
+    );
+    if (!response.ok) {
+      throw new Error(`token refresh failed: status ${response.status}, body: ${rawText}`);
+    }
+    if (!isObject(data) || !data.access_token) {
+      throw new Error("token refresh failed: invalid response body");
+    }
+    const expiresIn = Number(data.expires_in || 0);
+    const expiresAt = Math.floor(Date.now() / 1000) + (Number.isFinite(expiresIn) ? expiresIn : 0);
+    const newCredentials = { ...account.credentials };
+    newCredentials.access_token = String(data.access_token);
+    newCredentials.token_type = String(data.token_type || "Bearer");
+    newCredentials.expires_in = expiresIn;
+    newCredentials.expires_at = expiresAt;
+    if (data.refresh_token) newCredentials.refresh_token = String(data.refresh_token);
+    if (data.scope) newCredentials.scope = String(data.scope);
+    account.credentials = newCredentials;
+    account.updated_at = nowISO();
+    return { account_id: account.id, refreshed: true };
+  } catch (err) {
+    return { account_id: account.id, refreshed: false, reason: "refresh_failed", error: String(err.message || err) };
+  }
+}
+
+async function refreshAllExpiredTokens() {
+  const results = [];
+  for (const account of accounts) {
+    if (needsTokenRefresh(account)) {
+      const result = await refreshSingleAccountToken(account);
+      results.push(result);
+    }
+  }
+  if (results.length > 0) {
+    saveAccounts();
+  }
+  return results;
+}
+
 async function forceRefreshAllUsage() {
   if (refreshUsageTask) {
     return refreshUsageTask;
@@ -720,18 +794,23 @@ async function runBackgroundRefreshCycle(source) {
   backgroundRefresh.last_error = null;
 
   try {
+    const tokenResults = await refreshAllExpiredTokens();
     const result = await forceRefreshAllUsage();
     if (backgroundRefresh.task_enabled && backgroundRefresh.task_content) {
       for (const account of accounts) {
         fireClaudeTask(account, backgroundRefresh.task_content);
       }
     }
+    const tokenRefreshed = tokenResults.filter((r) => r.refreshed).length;
+    const tokenFailed = tokenResults.filter((r) => !r.refreshed && r.reason !== "no_refresh_token" && r.reason !== undefined && r.reason !== "platform_not_supported").length;
     backgroundRefresh.last_result = {
       source,
       at: nowISO(),
       total: result.total,
       refreshed: result.refreshed,
-      failed: result.failed
+      failed: result.failed,
+      token_refreshed: tokenRefreshed,
+      token_failed: tokenFailed
     };
     return result;
   } catch (err) {
