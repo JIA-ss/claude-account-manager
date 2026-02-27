@@ -716,6 +716,21 @@ const TASK_TOOLS = [
       },
       required: ["content"]
     }
+  },
+  {
+    name: "dispatch_subtasks_parallel",
+    description: "Dispatch multiple sub-tasks in parallel and return all results at once. Much faster than calling dispatch_subtask multiple times. Use this when you need to run 2 or more independent sub-tasks simultaneously.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tasks: {
+          type: "array",
+          description: "Array of task content strings to dispatch in parallel (max 20)",
+          items: { type: "string" }
+        }
+      },
+      required: ["tasks"]
+    }
   }
 ];
 
@@ -813,6 +828,17 @@ async function executeTaskTool(toolName, toolInput, account) {
       return executeTool_bash(toolInput.command);
     case "dispatch_subtask":
       return executeTool_dispatchSubtask(account, toolInput.content);
+    case "dispatch_subtasks_parallel": {
+      const tasks = toolInput.tasks;
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return { success: false, error: "tasks must be a non-empty array" };
+      }
+      const limited = tasks.slice(0, 20);
+      const results = await Promise.all(
+        limited.map((content) => executeTool_dispatchSubtask(account, String(content)))
+      );
+      return { success: true, count: limited.length, results };
+    }
     default:
       return { success: false, error: `Unknown tool: ${toolName}` };
   }
