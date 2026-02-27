@@ -107,6 +107,49 @@ body {
   min-height: 64px;
 }
 
+.bg-task-results {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.task-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.task-result-item:last-child {
+  border-bottom: none;
+}
+
+.task-result-item.task-result-error .task-result-text {
+  color: #e53e3e;
+}
+
+.task-result-name {
+  font-weight: 600;
+  color: #2d3748;
+  font-size: 12px;
+}
+
+.task-result-time {
+  color: #a0aec0;
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.task-result-text {
+  color: #4a5568;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
 .bg-refresh-grid {
   margin-top: 10px;
   border: 1px solid #e2e8f0;

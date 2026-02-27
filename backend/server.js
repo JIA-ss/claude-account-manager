@@ -59,7 +59,8 @@ const backgroundRefresh = {
   last_started_at: null,
   last_finished_at: null,
   last_error: null,
-  last_result: null
+  last_result: null,
+  last_task_results: []
 };
 
 function nowISO() {
@@ -681,13 +682,13 @@ async function refreshSingleAccountUsage(account) {
   }
 }
 
-function fireClaudeTask(account, taskContent) {
-  if (account.platform !== "anthropic") return;
+async function fireClaudeTask(account, taskContent) {
+  if (account.platform !== "anthropic") return null;
   const accessToken =
     isObject(account.credentials) && typeof account.credentials.access_token === "string"
       ? account.credentials.access_token.trim()
       : "";
-  if (!accessToken) return;
+  if (!accessToken) return null;
 
   const body = JSON.stringify({
     model: "claude-haiku-4-5-20251001",
@@ -696,21 +697,38 @@ function fireClaudeTask(account, taskContent) {
     messages: [{ role: "user", content: taskContent }]
   });
 
-  fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${accessToken}`,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
-      "User-Agent": "claude-cli/2.1.22 (external, cli)",
-      "X-App": "cli",
-      "Anthropic-Dangerous-Direct-Browser-Access": "true"
-    },
-    body
-  }).then((res) => {
-    if (res.body) res.body.cancel();
-  }).catch(() => {});
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+        "User-Agent": "claude-cli/2.1.22 (external, cli)",
+        "X-App": "cli",
+        "Anthropic-Dangerous-Direct-Browser-Access": "true"
+      },
+      body,
+      signal: controller.signal
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const errMsg = (isObject(data.error) && data.error.message) ? data.error.message : `status ${res.status}`;
+      return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+    }
+    const text = Array.isArray(data.content)
+      ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("")
+      : "";
+    return { account_id: account.id, name: account.name, text, at: nowISO() };
+  } catch (err) {
+    const errMsg = err.name === "AbortError" ? "请求超时" : String(err.message || err);
+    return { account_id: account.id, name: account.name, error: errMsg, at: nowISO() };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function needsTokenRefresh(account) {
@@ -828,17 +846,20 @@ async function runBackgroundRefreshCycle(source) {
     const tokenRefreshed = tokenResults.filter((r) => r.refreshed).length;
     const tokenFailed = tokenResults.filter((r) => !r.refreshed && r.reason !== "no_refresh_token" && r.reason !== undefined && r.reason !== "platform_not_supported").length;
     let taskFired = 0;
+    const taskPromises = [];
     if (backgroundRefresh.task_enabled && backgroundRefresh.task_content) {
       for (const account of accounts) {
         if (account.platform === "anthropic" &&
             isObject(account.credentials) &&
             typeof account.credentials.access_token === "string" &&
             account.credentials.access_token.trim()) {
-          fireClaudeTask(account, backgroundRefresh.task_content);
+          taskPromises.push(fireClaudeTask(account, backgroundRefresh.task_content));
           taskFired += 1;
         }
       }
     }
+    const taskResults = taskFired > 0 ? await Promise.all(taskPromises) : [];
+    backgroundRefresh.last_task_results = taskResults.filter(Boolean);
     backgroundRefresh.last_result = {
       source,
       at: nowISO(),
@@ -1653,7 +1674,8 @@ function buildBackgroundRefreshStatus() {
     last_error: backgroundRefresh.last_error,
     last_result: backgroundRefresh.last_result,
     task_enabled: backgroundRefresh.task_enabled,
-    task_content: backgroundRefresh.task_content
+    task_content: backgroundRefresh.task_content,
+    last_task_results: backgroundRefresh.last_task_results
   };
 }
 

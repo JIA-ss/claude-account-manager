@@ -36,7 +36,8 @@ const state = {
     last_error: null,
     last_result: null,
     task_enabled: false,
-    task_content: ""
+    task_content: "",
+    last_task_results: []
   },
   oauthCreate: {
     authUrl: "",
@@ -70,6 +71,7 @@ const els = {
   bgRefreshLastFinish: document.getElementById("bg-refresh-last-finish"),
   bgRefreshLastResult: document.getElementById("bg-refresh-last-result"),
   bgTaskLastResult: document.getElementById("bg-task-last-result"),
+  bgTaskResults: document.getElementById("bg-task-results"),
   bgTaskEnabled: document.getElementById("bg-task-enabled"),
   bgTaskContent: document.getElementById("bg-task-content"),
   btnCreate: document.getElementById("btn-create"),
@@ -395,6 +397,14 @@ function renderIntervalOptions() {
   });
 }
 
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function renderBackgroundRefreshIntervalOptions() {
   const options = state.backgroundRefresh.allowed_intervals || [];
   const current = Number(state.backgroundRefresh.interval_seconds || 60);
@@ -468,6 +478,7 @@ function renderBackgroundRefreshStatus() {
   if (!s.task_enabled) {
     els.bgTaskLastResult.textContent = "未启用";
     els.bgTaskLastResult.className = "";
+    els.bgTaskResults.classList.add("hidden");
   } else if (s.last_result && typeof s.last_result === "object" && typeof s.last_result.task_fired === "number") {
     const fired = s.last_result.task_fired;
     const when = s.last_result.task_at ? formatRelativeTime(s.last_result.task_at) : "-";
@@ -481,6 +492,25 @@ function renderBackgroundRefreshStatus() {
   } else {
     els.bgTaskLastResult.textContent = "尚未执行";
     els.bgTaskLastResult.className = "";
+  }
+
+  // 渲染任务详情列表
+  const results = s.last_task_results;
+  if (s.task_enabled && Array.isArray(results) && results.length > 0) {
+    els.bgTaskResults.innerHTML = results
+      .map((r) => {
+        const name = r.name || r.account_id || "未知";
+        const at = r.at ? `<span class="task-result-time">${formatRelativeTime(r.at)}</span>` : "";
+        if (r.error) {
+          return `<div class="task-result-item task-result-error"><span class="task-result-name">${escHtml(name)}</span>${at}<span class="task-result-text">${escHtml(r.error)}</span></div>`;
+        }
+        const text = typeof r.text === "string" ? r.text : "";
+        return `<div class="task-result-item"><span class="task-result-name">${escHtml(name)}</span>${at}<span class="task-result-text">${escHtml(text)}</span></div>`;
+      })
+      .join("");
+    els.bgTaskResults.classList.remove("hidden");
+  } else {
+    els.bgTaskResults.classList.add("hidden");
   }
 }
 
@@ -530,6 +560,7 @@ async function fetchBackgroundRefreshStatus(silent) {
     state.backgroundRefresh.last_result = data.last_result || null;
     state.backgroundRefresh.task_enabled = data.task_enabled === true;
     state.backgroundRefresh.task_content = typeof data.task_content === "string" ? data.task_content : "";
+    state.backgroundRefresh.last_task_results = Array.isArray(data.last_task_results) ? data.last_task_results : [];
     renderBackgroundRefreshStatus();
   } catch (err) {
     if (!silent) {
